@@ -9,17 +9,24 @@
 /// Description  :  Simple example of a Nexus addon implementation.
 ///----------------------------------------------------------------------------------------------------
 
-#include <Windows.h>
+#include <windows.h>
 
 #include "nexus/Nexus.h"
 #include "mumble/Mumble.h"
 #include "imgui/imgui.h"
+
+#include <fstream>
+#include <chrono>
+#include <vector>
 
 /* proto */
 void AddonLoad(AddonAPI* aApi);
 void AddonUnload();
 void AddonRender();
 void AddonOptions();
+
+void LoadNotepadData();
+void SaveNotepadData();
 
 /* globals */
 AddonDefinition AddonDef = {};
@@ -29,6 +36,18 @@ NexusLinkData* NexusLink = nullptr;
 Mumble::Data* MumbleLink = nullptr;
 
 bool someSetting         = false;
+
+/* globals */
+// ... your existing globals ...
+
+static std::string myNotepadText = "";
+static std::vector<char> textBuffer;
+bool isTextDirty = false;
+bool isDataLoaded = false;
+std::chrono::steady_clock::time_point lastTypeTime;
+const std::string dirPath = "addons/Notepad";
+const std::string savePath = dirPath + "/notepad.txt";
+
 
 ///----------------------------------------------------------------------------------------------------
 /// DllMain:
@@ -53,15 +72,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 ///----------------------------------------------------------------------------------------------------
 extern "C" __declspec(dllexport) AddonDefinition* GetAddonDef()
 {
-	AddonDef.Signature = -12345; // set to random unused negative integer
+	AddonDef.Signature = -173867; // set to random unused negative integer
 	AddonDef.APIVersion = NEXUS_API_VERSION;
-	AddonDef.Name = "My First Nexus Addon";
-	AddonDef.Version.Major = 1;
-	AddonDef.Version.Minor = 0;
+	AddonDef.Name = "Notepad";
+	AddonDef.Version.Major = 0;
+	AddonDef.Version.Minor = 1;
 	AddonDef.Version.Build = 0;
 	AddonDef.Version.Revision = 1;
-	AddonDef.Author = "Me, Myself and I";
-	AddonDef.Description = "This is my first Nexus addon.";
+	AddonDef.Author = "gumibo.1643";
+	AddonDef.Description = "Keep persistent notes for your journey.";
 	AddonDef.Load = AddonLoad;
 	AddonDef.Unload = AddonUnload;
 	AddonDef.Flags = EAddonFlags_None;
@@ -80,6 +99,7 @@ extern "C" __declspec(dllexport) AddonDefinition* GetAddonDef()
 ///----------------------------------------------------------------------------------------------------
 void AddonLoad(AddonAPI* aApi)
 {
+	FreeConsole();
 	APIDefs = aApi; // store the api somewhere easily accessible
 
 	ImGui::SetCurrentContext((ImGuiContext*)APIDefs->ImguiContext); // cast to ImGuiContext*
@@ -92,7 +112,9 @@ void AddonLoad(AddonAPI* aApi)
 	APIDefs->Renderer.Register(ERenderType_Render, AddonRender);
 	APIDefs->Renderer.Register(ERenderType_OptionsRender, AddonOptions);
 
-	APIDefs->Log(ELogLevel_DEBUG, "My First addon", "My <c=#00ff00>first addon</c> was loaded.");
+	LoadNotepadData();
+
+	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#00ff00>Notepad loaded.</c>");
 }
 
 ///----------------------------------------------------------------------------------------------------
@@ -105,7 +127,9 @@ void AddonUnload()
 	APIDefs->Renderer.Deregister(AddonRender);
 	APIDefs->Renderer.Deregister(AddonOptions);
 
-	APIDefs->Log(ELogLevel_DEBUG, "My First addon", "<c=#ff0000>Signing off</c>, it was an honor commander.");
+	SaveNotepadData();
+
+	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#ff0000>Notepad unloaded.</c>");
 }
 
 ///----------------------------------------------------------------------------------------------------
@@ -113,28 +137,72 @@ void AddonUnload()
 /// 	Called every frame. Safe to render any ImGui.
 /// 	You can control visibility on loading screens with NexusLink->IsGameplay.
 ///----------------------------------------------------------------------------------------------------
+
 void AddonRender()
 {
-	ImGuiIO& io = ImGui::GetIO();
+    if (!isDataLoaded){
+        return;
+    }
 
-	if (ImGui::Begin("MyFirstImGuiWindow"))
-	{
-		ImGui::Text("Hello Tyria!");
-		ImGui::Text("UI Tick: %u",
-			nullptr != MumbleLink
-			? MumbleLink->UITick
-			: 0
-		);
+	// Dynamic resize callback for when ImGui outgrows the current vector size.
+	// resizes vector safely and ipdates internal buffer pointer.
+    auto textCallback = [](ImGuiInputTextCallbackData* data) -> int {
+        if (data->EventFlag == ImGuiInputTextFlags_CallbackResize)
+        {
+            std::vector<char>* vec = static_cast<std::vector<char>*>(data->UserData);
+            vec->resize(data->BufTextLen + 1); // +1 accounts for the null-terminator '\0'
+            data->Buf = vec->data();           // Re-point ImGui to the new memory location
+        }
+        return 0;
+    };
 
-		ImGui::Text("%s",
-			nullptr != NexusLink
-			? NexusLink->IsMoving
-				? "Currently moving!"
-				: "Currently standing still."
-			: "We don't know whether we are standing or moving? NexusLink seems to be empty."
-		);
-	}
-	ImGui::End();
+	// Dynamic window title for when notes are saved/unsaved
+    std::string windowTitle;
+    if (isTextDirty) {
+        windowTitle = "Notepad (Unsaved)*###NotepadWindow";
+    } else {
+        windowTitle = "Notepad (Saved)###NotepadWindow";
+    }
+
+    ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(windowTitle.c_str()))
+    {
+		// move loaded file into vector workspace at startup
+        if (textBuffer.empty())
+        {
+            textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
+            textBuffer.push_back('\0');
+        }
+
+		// Callback flag along with pointer to our vector metadata (&textBuffer)
+        if (ImGui::InputTextMultiline("##NotepadField", 
+            textBuffer.data(), 
+            textBuffer.size(), 
+            ImVec2(-FLT_MIN, -FLT_MIN), 
+            ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackResize,
+            textCallback, 
+            &textBuffer
+        ))
+        {
+            // Sync the master string back from our safe char array
+            myNotepadText = textBuffer.data();
+            isTextDirty = true;
+            lastTypeTime = std::chrono::steady_clock::now();
+        }
+    }
+    ImGui::End();
+
+    // Autosave logic
+    if (isTextDirty)
+    {
+        auto currentTime = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(currentTime - lastTypeTime).count();
+
+        if (elapsed >= 1) 
+        {
+            SaveNotepadData();
+        }
+    }    
 }
 
 ///----------------------------------------------------------------------------------------------------
@@ -144,6 +212,41 @@ void AddonRender()
 void AddonOptions()
 {
 	ImGui::Separator();
-	ImGui::Text("My first Nexus addon");
+	ImGui::Text("Notepad");
 	ImGui::Checkbox("Some setting", &someSetting);
+}
+
+
+void LoadNotepadData()
+{
+    CreateDirectoryA(dirPath.c_str(), NULL);
+
+    std::ifstream file(savePath);
+    if (file.is_open())
+    {
+        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        myNotepadText = content;
+        file.close();
+    }
+    else
+    {
+        myNotepadText = "Type anything here...";
+    }
+
+    isDataLoaded = true;
+	lastTypeTime = std::chrono::steady_clock::now();
+}
+
+void SaveNotepadData()
+{
+    std::ofstream file(savePath);
+    if (file.is_open())
+    {
+        file << myNotepadText;
+        file.close();
+        isTextDirty = false; // Reset our flag
+        if (APIDefs) {
+            APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Notes safely autosaved to disk.");
+        }
+    }
 }
