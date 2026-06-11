@@ -85,10 +85,10 @@ extern "C" __declspec(dllexport) AddonDefinition* GetAddonDef()
 	AddonDef.Signature = -173867; // set to random unused negative integer
 	AddonDef.APIVersion = NEXUS_API_VERSION;
 	AddonDef.Name = "Notepad";
-	AddonDef.Version.Major = 0;
-	AddonDef.Version.Minor = 1;
+	AddonDef.Version.Major = 1;
+	AddonDef.Version.Minor = 0;
 	AddonDef.Version.Build = 0;
-	AddonDef.Version.Revision = 1;
+	AddonDef.Version.Revision = 0;
 	AddonDef.Author = "gumibo.1643";
 	AddonDef.Description = "Keep persistent notes for your journey.";
 	AddonDef.Load = AddonLoad;
