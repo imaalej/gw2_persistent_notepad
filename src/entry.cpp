@@ -25,6 +25,7 @@ void AddonUnload();
 void AddonRender();
 void AddonOptions();
 
+void onKeybind(const char* aIdentifier, bool aIsRelease);
 void LoadNotepadData();
 void SaveNotepadData();
 
@@ -44,9 +45,11 @@ static std::string myNotepadText = "";
 static std::vector<char> textBuffer;
 bool isTextDirty = false;
 bool isDataLoaded = false;
+bool showWindow = true;
 std::chrono::steady_clock::time_point lastTypeTime;
 const std::string dirPath = "addons/Notepad";
 const std::string savePath = dirPath + "/notepad.txt";
+const char* aId = "KB_PERSISTENT_NOTEPAD_TOGGLE_UI";
 
 
 ///----------------------------------------------------------------------------------------------------
@@ -112,6 +115,12 @@ void AddonLoad(AddonAPI* aApi)
 	APIDefs->Renderer.Register(ERenderType_Render, AddonRender);
 	APIDefs->Renderer.Register(ERenderType_OptionsRender, AddonOptions);
 
+    // Set Keybinding
+    APIDefs->InputBinds.RegisterWithString(aId, onKeybind, "ALT+SHIFT+E");
+
+    // QuickAccess_Add
+    //APIDefs->QuickAccess.Add(aIdentifier, Texture, TextureHoverIdentifier, KeybindIdentifier, tooltipText);;
+
 	LoadNotepadData();
 
 	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#00ff00>Notepad loaded.</c>");
@@ -127,6 +136,8 @@ void AddonUnload()
 	APIDefs->Renderer.Deregister(AddonRender);
 	APIDefs->Renderer.Deregister(AddonOptions);
 
+    APIDefs->InputBinds.Deregister(aId);
+
 	SaveNotepadData();
 
 	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#ff0000>Notepad unloaded.</c>");
@@ -140,9 +151,8 @@ void AddonUnload()
 
 void AddonRender()
 {
-    if (!isDataLoaded){
-        return;
-    }
+    if (!isDataLoaded){return;}
+    if (!showWindow){return;}
 
 	// Dynamic resize callback for when ImGui outgrows the current vector size.
 	// resizes vector safely and ipdates internal buffer pointer.
@@ -159,9 +169,9 @@ void AddonRender()
 	// Dynamic window title for when notes are saved/unsaved
     std::string windowTitle;
     if (isTextDirty) {
-        windowTitle = "Notepad (Unsaved)*###NotepadWindow";
+        windowTitle = "Notepad*###NotepadWindow";
     } else {
-        windowTitle = "Notepad (Saved)###NotepadWindow";
+        windowTitle = "Notepad###NotepadWindow";
     }
 
     ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
@@ -216,6 +226,11 @@ void AddonOptions()
 	ImGui::Checkbox("Some setting", &someSetting);
 }
 
+void onKeybind(const char* identifier, bool aIsRelease){
+    if (strcmp(identifier, aId) == 0 && !aIsRelease){
+        showWindow = !showWindow;
+    }
+}
 
 void LoadNotepadData()
 {
