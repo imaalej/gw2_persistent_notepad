@@ -6,7 +6,6 @@
 /// You may obtain a copy of the license at: https://opensource.org/license/MIT
 /// 
 /// Name         :  entry.cpp
-/// Description  :  Simple example of a Nexus addon implementation.
 ///----------------------------------------------------------------------------------------------------
 
 #include <windows.h>
@@ -14,6 +13,7 @@
 #include "nexus/Nexus.h"
 #include "mumble/Mumble.h"
 #include "imgui/imgui.h"
+#include "icon.h"
 
 #include <fstream>
 #include <chrono>
@@ -25,7 +25,8 @@ void AddonUnload();
 void AddonRender();
 void AddonOptions();
 
-void onKeybind(const char* aIdentifier, bool aIsRelease);
+
+void onKeybind(const char* aId, bool aIsRelease);
 void LoadNotepadData();
 void SaveNotepadData();
 
@@ -35,8 +36,6 @@ HMODULE hSelf            = nullptr;
 AddonAPI* APIDefs        = nullptr;
 NexusLinkData* NexusLink = nullptr;
 Mumble::Data* MumbleLink = nullptr;
-
-bool someSetting         = false;
 
 /* globals */
 // ... your existing globals ...
@@ -49,7 +48,12 @@ bool showWindow = true;
 std::chrono::steady_clock::time_point lastTypeTime;
 const std::string dirPath = "addons/Notepad";
 const std::string savePath = dirPath + "/notepad.txt";
-const char* aId = "KB_PERSISTENT_NOTEPAD_TOGGLE_UI";
+const char* gId = "KB_NOTEPAD_TOGGLE_UI";
+const char* gTexId = "TEX_NOTEPAD_ICON";
+
+//Keybinding
+char gKeybind[128] = "ALT+SHIFT+E";
+bool gRecordingKeybind = false;
 
 
 ///----------------------------------------------------------------------------------------------------
@@ -116,11 +120,33 @@ void AddonLoad(AddonAPI* aApi)
 	APIDefs->Renderer.Register(ERenderType_OptionsRender, AddonOptions);
 
     // Set Keybinding
-    APIDefs->InputBinds.RegisterWithString(aId, onKeybind, "ALT+SHIFT+E");
+    APIDefs->InputBinds.RegisterWithString(gId, onKeybind, gKeybind);
 
     // QuickAccess_Add
-    //APIDefs->QuickAccess.Add(aIdentifier, Texture, TextureHoverIdentifier, KeybindIdentifier, tooltipText);;
+    // APIDefs->Textures.LoadFromURL(
+    //     gTexId,
+    //     "https://wiki.guildwars2.com",
+    //     "/images/7/79/Engineer_trainer_(map_icon).png",
+    //     textureCallback
+    // );
 
+    APIDefs->Textures.LoadFromMemory(
+        gTexId,
+        (void*)icon_png,
+        icon_png_len,
+        // textureCallback
+        nullptr
+    );
+
+    APIDefs->QuickAccess.Add(
+        "QA_NOTEPAD_BUTTON",
+        gTexId,
+        gTexId,
+        gId,
+        "Toggle Notepad"
+    );
+
+    //Load notepad
 	LoadNotepadData();
 
 	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#00ff00>Notepad loaded.</c>");
@@ -136,7 +162,7 @@ void AddonUnload()
 	APIDefs->Renderer.Deregister(AddonRender);
 	APIDefs->Renderer.Deregister(AddonOptions);
 
-    APIDefs->InputBinds.Deregister(aId);
+    APIDefs->InputBinds.Deregister(gId);
 
 	SaveNotepadData();
 
@@ -223,11 +249,11 @@ void AddonOptions()
 {
 	ImGui::Separator();
 	ImGui::Text("Notepad");
-	ImGui::Checkbox("Some setting", &someSetting);
+    ImGui::Checkbox("Show Window", &showWindow);
 }
 
-void onKeybind(const char* identifier, bool aIsRelease){
-    if (strcmp(identifier, aId) == 0 && !aIsRelease){
+void onKeybind(const char* aId, bool aIsRelease){
+    if (strcmp(aId, gId) == 0 && !aIsRelease){
         showWindow = !showWindow;
     }
 }
