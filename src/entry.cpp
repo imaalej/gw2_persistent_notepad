@@ -209,12 +209,6 @@ void AddonRender() {
     ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(windowTitle.c_str()))
     {
-		// move loaded file into vector workspace at startup
-        if (textBuffer.empty())
-        {
-            textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
-            textBuffer.push_back('\0');
-        }
 
 		// Callback flag along with pointer to our vector metadata (&textBuffer)
         if (ImGui::InputTextMultiline("##NotepadField", 
@@ -293,6 +287,9 @@ void LoadSettings()
     {
         myNotepadText = "Type anything here...";
     }
+
+    textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
+    textBuffer.push_back('\0');
 
     isDataLoaded = true;
 	lastTypeTime = std::chrono::steady_clock::now();
