@@ -29,9 +29,7 @@ void AddonRender();
 void AddonOptions();
 
 
-void onKeybind(const char* aId, bool aIsRelease);
-// void LoadNotepadData();
-// void SaveNotepadData();
+void OnKeybind(const char* aId, bool aIsRelease);
 void LoadSettings();
 void SaveSettings();
 
@@ -125,7 +123,7 @@ void AddonLoad(AddonAPI* aApi)
 	APIDefs->Renderer.Register(ERenderType_OptionsRender, AddonOptions);
 
     // Set Keybinding
-    APIDefs->InputBinds.RegisterWithString(gId, onKeybind, gKeybind);
+    APIDefs->InputBinds.RegisterWithString(gId, OnKeybind, gKeybind);
 
     // Set up QuickAccess
     APIDefs->Textures.LoadFromMemory(
@@ -174,10 +172,19 @@ void AddonUnload()
 /// 	You can control visibility on loading screens with NexusLink->IsGameplay.
 ///----------------------------------------------------------------------------------------------------
 
-void AddonRender()
-{
-    if (!isDataLoaded){return;}
-    if (!showWindow){return;}
+void AddonRender() {
+    // Cutscenes
+    static uint32_t lastTick  = 0;
+    static int      frozenFor = 0;
+
+    if (MumbleLink && MumbleLink->UITick != lastTick)
+    {
+        lastTick  = MumbleLink->UITick;
+        frozenFor = 0;
+    }
+    else { frozenFor++; }
+
+    if (!isDataLoaded || !showWindow || (NexusLink && !NexusLink->IsGameplay) || frozenFor > 2){return;}
 
 	// Dynamic resize callback for when ImGui outgrows the current vector size.
 	// resizes vector safely and ipdates internal buffer pointer.
@@ -253,7 +260,7 @@ void AddonOptions()
     }
 }
 
-void onKeybind(const char* aId, bool aIsRelease){
+void OnKeybind(const char* aId, bool aIsRelease){
     if (strcmp(aId, gId) == 0 && !aIsRelease){
         showWindow = !showWindow;
     }

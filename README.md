@@ -6,7 +6,7 @@ This addon allows you to store notes.
 - ~~ImGui window decoration dynamically lets user know if the content is saved/unsaved~~
 - ~~Instead of a constantly open (or minimized with visible decorator) notepad, add a button at the top for a toggle~~
 - off on loading screen
-- guard textBuffer initialization
+- guard textBuffer initialization (ok actually more important now)
 - sync textBuffer and notepadText on load
 - error logging on failed save
 - ~~Keybind to toggle notepad on or off~~
