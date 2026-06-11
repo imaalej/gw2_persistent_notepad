@@ -12,6 +12,8 @@ This addon allows you to store notes.
 - ~~Keybind to toggle notepad on or off~~
 - ~~Settings? (keep pinned?)~~
 - Save button for just in case?
+- Notepad per character rather than per account
+- Tabs for the notepad where the user can add or delete, also renaming the tabs / organizing them
 
 
 ## Getting Started
