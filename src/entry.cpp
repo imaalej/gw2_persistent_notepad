@@ -6,7 +6,6 @@
 /// You may obtain a copy of the license at: https://opensource.org/license/MIT
 /// 
 /// Name         :  entry.cpp
-/// Description  :  Simple example of a Nexus addon implementation.
 ///----------------------------------------------------------------------------------------------------
 
 #include <windows.h>
@@ -14,6 +13,10 @@
 #include "nexus/Nexus.h"
 #include "mumble/Mumble.h"
 #include "imgui/imgui.h"
+#include "icon.h"
+
+#include "json.hpp"
+using json = nlohmann::json;
 
 #include <fstream>
 #include <chrono>
@@ -25,8 +28,10 @@ void AddonUnload();
 void AddonRender();
 void AddonOptions();
 
-void LoadNotepadData();
-void SaveNotepadData();
+
+void OnKeybind(const char* aId, bool aIsRelease);
+void LoadSettings();
+void SaveSettings();
 
 /* globals */
 AddonDefinition AddonDef = {};
@@ -35,8 +40,6 @@ AddonAPI* APIDefs        = nullptr;
 NexusLinkData* NexusLink = nullptr;
 Mumble::Data* MumbleLink = nullptr;
 
-bool someSetting         = false;
-
 /* globals */
 // ... your existing globals ...
 
@@ -44,9 +47,16 @@ static std::string myNotepadText = "";
 static std::vector<char> textBuffer;
 bool isTextDirty = false;
 bool isDataLoaded = false;
+bool showWindow = false;
 std::chrono::steady_clock::time_point lastTypeTime;
 const std::string dirPath = "addons/Notepad";
-const std::string savePath = dirPath + "/notepad.txt";
+const std::string savePath = dirPath + "/settings.json";
+const char* gId = "KB_NOTEPAD_TOGGLE_UI";
+const char* gTexId = "TEX_NOTEPAD_ICON";
+
+//Keybinding
+char gKeybind[128] = "ALT+SHIFT+E";
+bool gRecordingKeybind = false;
 
 
 ///----------------------------------------------------------------------------------------------------
@@ -112,7 +122,27 @@ void AddonLoad(AddonAPI* aApi)
 	APIDefs->Renderer.Register(ERenderType_Render, AddonRender);
 	APIDefs->Renderer.Register(ERenderType_OptionsRender, AddonOptions);
 
-	LoadNotepadData();
+    // Set Keybinding
+    APIDefs->InputBinds.RegisterWithString(gId, OnKeybind, gKeybind);
+
+    // Set up QuickAccess
+    APIDefs->Textures.LoadFromMemory(
+        gTexId,
+        (void*)icon_png,
+        icon_png_len,
+        nullptr
+    );
+
+    APIDefs->QuickAccess.Add(
+        "QA_NOTEPAD",
+        gTexId,
+        gTexId,
+        gId,
+        "Toggle Notepad"
+    );
+
+    // Load notepad and settings.
+    LoadSettings();
 
 	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#00ff00>Notepad loaded.</c>");
 }
@@ -127,7 +157,11 @@ void AddonUnload()
 	APIDefs->Renderer.Deregister(AddonRender);
 	APIDefs->Renderer.Deregister(AddonOptions);
 
-	SaveNotepadData();
+    APIDefs->InputBinds.Deregister(gId);
+
+    APIDefs->QuickAccess.Remove("QA_NOTEPAD");
+
+	SaveSettings();
 
 	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#ff0000>Notepad unloaded.</c>");
 }
@@ -138,11 +172,19 @@ void AddonUnload()
 /// 	You can control visibility on loading screens with NexusLink->IsGameplay.
 ///----------------------------------------------------------------------------------------------------
 
-void AddonRender()
-{
-    if (!isDataLoaded){
-        return;
+void AddonRender() {
+    // Cutscenes
+    static uint32_t lastTick  = 0;
+    static int      frozenFor = 0;
+
+    if (MumbleLink && MumbleLink->UITick != lastTick)
+    {
+        lastTick  = MumbleLink->UITick;
+        frozenFor = 0;
     }
+    else { frozenFor++; }
+
+    if (!isDataLoaded || !showWindow || (NexusLink && !NexusLink->IsGameplay) || frozenFor > 2){return;}
 
 	// Dynamic resize callback for when ImGui outgrows the current vector size.
 	// resizes vector safely and ipdates internal buffer pointer.
@@ -159,20 +201,14 @@ void AddonRender()
 	// Dynamic window title for when notes are saved/unsaved
     std::string windowTitle;
     if (isTextDirty) {
-        windowTitle = "Notepad (Unsaved)*###NotepadWindow";
+        windowTitle = "Notepad*###NotepadWindow";
     } else {
-        windowTitle = "Notepad (Saved)###NotepadWindow";
+        windowTitle = "Notepad###NotepadWindow";
     }
 
     ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
     if (ImGui::Begin(windowTitle.c_str()))
     {
-		// move loaded file into vector workspace at startup
-        if (textBuffer.empty())
-        {
-            textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
-            textBuffer.push_back('\0');
-        }
 
 		// Callback flag along with pointer to our vector metadata (&textBuffer)
         if (ImGui::InputTextMultiline("##NotepadField", 
@@ -200,7 +236,7 @@ void AddonRender()
 
         if (elapsed >= 1) 
         {
-            SaveNotepadData();
+            SaveSettings();
         }
     }    
 }
@@ -213,40 +249,66 @@ void AddonOptions()
 {
 	ImGui::Separator();
 	ImGui::Text("Notepad");
-	ImGui::Checkbox("Some setting", &someSetting);
+    if (ImGui::Checkbox("Show Window", &showWindow)){
+        SaveSettings();
+    }
 }
 
+void OnKeybind(const char* aId, bool aIsRelease){
+    if (strcmp(aId, gId) == 0 && !aIsRelease){
+        showWindow = !showWindow;
+    }
+}
 
-void LoadNotepadData()
+void LoadSettings()
 {
     CreateDirectoryA(dirPath.c_str(), NULL);
 
     std::ifstream file(savePath);
     if (file.is_open())
     {
-        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        myNotepadText = content;
-        file.close();
+        // std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        // myNotepadText = content;
+        // file.close();
+        try{
+            json j;
+            file >> j;
+            file.close();
+
+            myNotepadText = j.value("notepad_text", "Type anything here...");
+            showWindow = j.value("show_window", false);
+        } catch (...) {
+            //malformed JSON -- fallback to defaults
+            myNotepadText = "Type anything here...";
+            showWindow = false;
+        }
     }
     else
     {
         myNotepadText = "Type anything here...";
     }
 
+    textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
+    textBuffer.push_back('\0');
+
     isDataLoaded = true;
 	lastTypeTime = std::chrono::steady_clock::now();
 }
 
-void SaveNotepadData()
+void SaveSettings()
 {
+    json j;
+    j["notepad_text"] = myNotepadText;
+    j["show_window"] = showWindow;
+
     std::ofstream file(savePath);
     if (file.is_open())
     {
-        file << myNotepadText;
+        file << j.dump(4);
         file.close();
         isTextDirty = false; // Reset our flag
         if (APIDefs) {
-            APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Notes safely autosaved to disk.");
+            APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Settings and notepad saved to disk.");
         }
     }
 }
