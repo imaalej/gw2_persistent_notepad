@@ -15,6 +15,9 @@
 #include "imgui/imgui.h"
 #include "icon.h"
 
+#include "json.hpp"
+using json = nlohmann::json;
+
 #include <fstream>
 #include <chrono>
 #include <vector>
@@ -27,8 +30,10 @@ void AddonOptions();
 
 
 void onKeybind(const char* aId, bool aIsRelease);
-void LoadNotepadData();
-void SaveNotepadData();
+// void LoadNotepadData();
+// void SaveNotepadData();
+void LoadSettings();
+void SaveSettings();
 
 /* globals */
 AddonDefinition AddonDef = {};
@@ -44,10 +49,10 @@ static std::string myNotepadText = "";
 static std::vector<char> textBuffer;
 bool isTextDirty = false;
 bool isDataLoaded = false;
-bool showWindow = true;
+bool showWindow = false;
 std::chrono::steady_clock::time_point lastTypeTime;
 const std::string dirPath = "addons/Notepad";
-const std::string savePath = dirPath + "/notepad.txt";
+const std::string savePath = dirPath + "/settings.json";
 const char* gId = "KB_NOTEPAD_TOGGLE_UI";
 const char* gTexId = "TEX_NOTEPAD_ICON";
 
@@ -122,32 +127,24 @@ void AddonLoad(AddonAPI* aApi)
     // Set Keybinding
     APIDefs->InputBinds.RegisterWithString(gId, onKeybind, gKeybind);
 
-    // QuickAccess_Add
-    // APIDefs->Textures.LoadFromURL(
-    //     gTexId,
-    //     "https://wiki.guildwars2.com",
-    //     "/images/7/79/Engineer_trainer_(map_icon).png",
-    //     textureCallback
-    // );
-
+    // Set up QuickAccess
     APIDefs->Textures.LoadFromMemory(
         gTexId,
         (void*)icon_png,
         icon_png_len,
-        // textureCallback
         nullptr
     );
 
     APIDefs->QuickAccess.Add(
-        "QA_NOTEPAD_BUTTON",
+        "QA_NOTEPAD",
         gTexId,
         gTexId,
         gId,
         "Toggle Notepad"
     );
 
-    //Load notepad
-	LoadNotepadData();
+    // Load notepad and settings.
+    LoadSettings();
 
 	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#00ff00>Notepad loaded.</c>");
 }
@@ -164,7 +161,9 @@ void AddonUnload()
 
     APIDefs->InputBinds.Deregister(gId);
 
-	SaveNotepadData();
+    APIDefs->QuickAccess.Remove("QA_NOTEPAD");
+
+	SaveSettings();
 
 	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#ff0000>Notepad unloaded.</c>");
 }
@@ -236,7 +235,7 @@ void AddonRender()
 
         if (elapsed >= 1) 
         {
-            SaveNotepadData();
+            SaveSettings();
         }
     }    
 }
@@ -249,7 +248,9 @@ void AddonOptions()
 {
 	ImGui::Separator();
 	ImGui::Text("Notepad");
-    ImGui::Checkbox("Show Window", &showWindow);
+    if (ImGui::Checkbox("Show Window", &showWindow)){
+        SaveSettings();
+    }
 }
 
 void onKeybind(const char* aId, bool aIsRelease){
@@ -258,16 +259,28 @@ void onKeybind(const char* aId, bool aIsRelease){
     }
 }
 
-void LoadNotepadData()
+void LoadSettings()
 {
     CreateDirectoryA(dirPath.c_str(), NULL);
 
     std::ifstream file(savePath);
     if (file.is_open())
     {
-        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        myNotepadText = content;
-        file.close();
+        // std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        // myNotepadText = content;
+        // file.close();
+        try{
+            json j;
+            file >> j;
+            file.close();
+
+            myNotepadText = j.value("notepad_text", "Type anything here...");
+            showWindow = j.value("show_window", false);
+        } catch (...) {
+            //malformed JSON -- fallback to defaults
+            myNotepadText = "Type anything here...";
+            showWindow = false;
+        }
     }
     else
     {
@@ -278,16 +291,20 @@ void LoadNotepadData()
 	lastTypeTime = std::chrono::steady_clock::now();
 }
 
-void SaveNotepadData()
+void SaveSettings()
 {
+    json j;
+    j["notepad_text"] = myNotepadText;
+    j["show_window"] = showWindow;
+
     std::ofstream file(savePath);
     if (file.is_open())
     {
-        file << myNotepadText;
+        file << j.dump(4);
         file.close();
         isTextDirty = false; // Reset our flag
         if (APIDefs) {
-            APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Notes safely autosaved to disk.");
+            APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Settings and notepad saved to disk.");
         }
     }
 }
