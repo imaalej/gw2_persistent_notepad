@@ -212,7 +212,7 @@ void AddonRender()
                     ImGui::EndTabItem();
                 }
 
-                if (p_open && !open)
+                if (p_open && !open && gNoteToDeleteId == -1)
                 {
                     gNoteToDeleteId = note.mId;
                     openPopup = true;
@@ -369,9 +369,23 @@ void SaveSettings()
     if (file.is_open())
     {
         file << j.dump(4);
-        file.close();
-        isTextDirty = false;
+        if (file.good())
+        {
+            file.close();
+            isTextDirty = false;
+            if (APIDefs)
+                APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Settings and notepad saved to disk.");
+        }
+        else
+        {
+            file.close();
+            if (APIDefs)
+                APIDefs->Log(ELogLevel_WARNING, "Notepad", "Failed to write settings to disk.");
+        }
+    }
+    else
+    {
         if (APIDefs)
-            APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Settings and notepad saved to disk.");
+            APIDefs->Log(ELogLevel_WARNING, "Notepad", "Failed to open settings file for writing.");
     }
 }
