@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include "json.hpp"
 
 class Notepad{
     public:
@@ -7,8 +8,12 @@ class Notepad{
         struct NoteInstance{
             int mId;
             bool isDirty;
-            bool charSpecific;
+            bool charSpecific; // depend on colour coding
+            // and if character specific, how do we remember that to store and check?
             std::string noteText;
+
+            //macro to json map individual notes
+            NLOHMANN_DEFINE_TYPE_INTRUSIVE(NoteInstance, mId, isDirty, charSpecific, noteText)
         };
 
         // Constructor
@@ -20,6 +25,7 @@ class Notepad{
 
         void addNoteInstance(bool aCharSpecific){
             notes.push_back({mIdCounter++,false, aCharSpecific, "Type anything here..."});
+
         }
 
         void removeNoteInstance(int aId){
@@ -30,8 +36,15 @@ class Notepad{
                 }
             }
         }
+
+        int getLength(){
+            return notes.size();
+        }
     
     private:
         std::vector<NoteInstance> notes;
         int mIdCounter;
+
+        //macro to serialize vector
+        NLOHMANN_DEFINE_TYPE_INTRUSIVE(Notepad, notes, mIdCounter)
 };

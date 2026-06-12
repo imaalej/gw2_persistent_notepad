@@ -267,9 +267,6 @@ void LoadSettings()
     std::ifstream file(savePath);
     if (file.is_open())
     {
-        // std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        // myNotepadText = content;
-        // file.close();
         try{
             json j;
             file >> j;
