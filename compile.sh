@@ -9,6 +9,7 @@ echo "Starting cross-compilation for ${OUTPUT_DLL}..."
 x86_64-w64-mingw32-g++ -shared -o "$OUTPUT_DLL" \
     src/entry.cpp \
     src/imgui/*.cpp \
+    src/notes.cpp \
     -I./src \
     -I./src/nexus \
     -I./src/imgui \
