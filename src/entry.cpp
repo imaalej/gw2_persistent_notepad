@@ -8,12 +8,14 @@
 /// Name         :  entry.cpp
 ///----------------------------------------------------------------------------------------------------
 
+
 #include <windows.h>
 
 #include "nexus/Nexus.h"
 #include "mumble/Mumble.h"
 #include "imgui/imgui.h"
 #include "icon.h"
+#include "notes.h"
 
 #include "json.hpp"
 using json = nlohmann::json;
@@ -43,10 +45,11 @@ Mumble::Data* MumbleLink = nullptr;
 /* globals */
 // ... your existing globals ...
 
-static std::string myNotepadText = "";
+Notepad gNotepad;
+static std::string stagingText = ""; // To be depreciated
 static std::vector<char> textBuffer;
-bool isTextDirty = false;
-bool isDataLoaded = false;
+bool isTextDirty = false; // UI-layer dirty flag
+bool isDataLoaded = false; // True once LoadSettings completes
 bool showWindow = false;
 std::chrono::steady_clock::time_point lastTypeTime;
 const std::string dirPath = "addons/Notepad";
@@ -221,7 +224,8 @@ void AddonRender() {
         ))
         {
             // Sync the master string back from our safe char array
-            myNotepadText = textBuffer.data();
+            stagingText = textBuffer.data();
+            gNotepad.setNoteText(0, textBuffer.data());
             isTextDirty = true;
             lastTypeTime = std::chrono::steady_clock::now();
         }
@@ -272,20 +276,27 @@ void LoadSettings()
             file >> j;
             file.close();
 
-            myNotepadText = j.value("notepad_text", "Type anything here...");
+            if (j.contains("notepad_data")) {
+                gNotepad = j.at("notepad_data").get<Notepad>();
+            }
+
             showWindow = j.value("show_window", false);
         } catch (...) {
             //malformed JSON -- fallback to defaults
-            myNotepadText = "Type anything here...";
+            // gNotepad's constructor already handles defaults.
+            stagingText = "Type anything here...";
             showWindow = false;
         }
     }
     else
     {
-        myNotepadText = "Type anything here...";
+        stagingText = "Type anything here...";
     }
 
-    textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
+
+    // textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
+    stagingText = gNotepad.getNoteText(0);
+    textBuffer.assign(stagingText.begin(), stagingText.end());
     textBuffer.push_back('\0');
 
     isDataLoaded = true;
@@ -295,7 +306,7 @@ void LoadSettings()
 void SaveSettings()
 {
     json j;
-    j["notepad_text"] = myNotepadText;
+    j["notepad_data"] = gNotepad;
     j["show_window"] = showWindow;
 
     std::ofstream file(savePath);
@@ -304,6 +315,7 @@ void SaveSettings()
         file << j.dump(4);
         file.close();
         isTextDirty = false; // Reset our flag
+        gNotepad.clearDirtyFlag(0);
         if (APIDefs) {
             APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Settings and notepad saved to disk.");
         }
