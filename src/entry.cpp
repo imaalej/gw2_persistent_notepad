@@ -170,8 +170,8 @@ void AddonRender()
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar;
     if (ImGui::Begin(windowTitle.c_str(), &showWindow, flags))
     {
-        ImGui::Text(isTextDirty ? "Notepad*" : "Notepad");
-        ImGui::Separator();
+        // ImGui::Text(isTextDirty ? "Notepad*" : "Notepad");
+        // ImGui::Separator();
 
         bool wantAdd = false;
         bool openPopup = false;
@@ -181,7 +181,7 @@ void AddonRender()
         {
             for (auto& note : gNotepad.notes)
             {
-                std::string label = "#" + std::to_string(note.mId) + "###Tab_" + std::to_string(note.mId);
+                std::string label = "#" + std::to_string(note.mId) + (isTextDirty ? "*":"") + "###Tab_" + std::to_string(note.mId);
                 bool open = true;
                 bool* p_open = (note.mId == gActiveNoteId && gNotepad.getLength() > 1) ? &open : nullptr;
 
