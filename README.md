@@ -9,11 +9,11 @@ This addon allows you to store notes.
 - ~~guard textBuffer initialization~~
 - ~~Keybind to toggle notepad on or off~~
 - ~~Settings? (keep pinned?)~~
-- sync textBuffer and notepadText on load
-- error logging on failed save
-- Save button for just in case?
-- Notepad per character rather than per account
-- Tabs for the notepad where the user can add or delete, also renaming the tabs / organizing them
+- ~~sync textBuffer and notepadText on load~~
+- ~~Tabs for the notepad where the user can add or delete, reorganizing~~
+- Per character notes
+- Font size customization
+- rename tabs
 
 
 ## Getting Started
