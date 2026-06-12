@@ -8,8 +8,8 @@
 /// Name         :  entry.cpp
 ///----------------------------------------------------------------------------------------------------
 
-
 #include <windows.h>
+#include <direct.h> // for _mkdir
 
 #include "nexus/Nexus.h"
 #include "mumble/Mumble.h"
@@ -30,7 +30,6 @@ void AddonUnload();
 void AddonRender();
 void AddonOptions();
 
-
 void OnKeybind(const char* aId, bool aIsRelease);
 void LoadSettings();
 void SaveSettings();
@@ -42,255 +41,176 @@ AddonAPI* APIDefs        = nullptr;
 NexusLinkData* NexusLink = nullptr;
 Mumble::Data* MumbleLink = nullptr;
 
-/* globals */
-// ... your existing globals ...
-
 Notepad gNotepad;
-static std::string stagingText = ""; // To be depreciated
 static std::vector<char> textBuffer;
 static int gActiveNoteId = 0;
 static int gPendingNoteId = -1; // -1 indicates no switch pending
-bool isTextDirty = false; // UI-layer dirty flag
-bool isDataLoaded = false; // True once LoadSettings completes
+bool isTextDirty = false;
+bool isDataLoaded = false;
 bool showWindow = false;
 std::chrono::steady_clock::time_point lastTypeTime;
 const std::string dirPath = "addons/Notepad";
 const std::string savePath = dirPath + "/settings.json";
 const char* gId = "KB_NOTEPAD_TOGGLE_UI";
 const char* gTexId = "TEX_NOTEPAD_ICON";
-
-//Keybinding
 char gKeybind[128] = "ALT+SHIFT+E";
-bool gRecordingKeybind = false;
-
 
 ///----------------------------------------------------------------------------------------------------
-/// DllMain:
-/// 	Main entry point for DLL.
-/// 	We are not interested in this, all we get is our own HMODULE in case we need it.
+/// DllMain
 ///----------------------------------------------------------------------------------------------------
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
-	switch (ul_reason_for_call)
-	{
-		case DLL_PROCESS_ATTACH: hSelf = hModule; break;
-		case DLL_PROCESS_DETACH: break;
-		case DLL_THREAD_ATTACH: break;
-		case DLL_THREAD_DETACH: break;
-	}
-	return TRUE;
+    switch (ul_reason_for_call)
+    {
+        case DLL_PROCESS_ATTACH: hSelf = hModule; break;
+        case DLL_PROCESS_DETACH: break;
+        case DLL_THREAD_ATTACH: break;
+        case DLL_THREAD_DETACH: break;
+    }
+    return TRUE;
 }
 
 ///----------------------------------------------------------------------------------------------------
-/// GetAddonDef:
-/// 	Export needed to give Nexus information about the addon.
+/// GetAddonDef
 ///----------------------------------------------------------------------------------------------------
 extern "C" __declspec(dllexport) AddonDefinition* GetAddonDef()
 {
-	AddonDef.Signature = -173867; // set to random unused negative integer
-	AddonDef.APIVersion = NEXUS_API_VERSION;
-	AddonDef.Name = "Notepad";
-	AddonDef.Version.Major = 1;
-	AddonDef.Version.Minor = 0;
-	AddonDef.Version.Build = 0;
-	AddonDef.Version.Revision = 0;
-	AddonDef.Author = "gumibo.1643";
-	AddonDef.Description = "Keep persistent notes for your journey.";
-	AddonDef.Load = AddonLoad;
-	AddonDef.Unload = AddonUnload;
-	AddonDef.Flags = EAddonFlags_None;
-
-	/* not necessary if hosted on Raidcore, but shown anyway for the example also useful as a backup resource */
-	//AddonDef.Provider = EUpdateProvider_GitHub;
-	//AddonDef.UpdateLink = "https://github.com/RaidcoreGG/GW2Nexus-AddonTemplate";
-
-	return &AddonDef;
+    AddonDef.Signature = -173867;
+    AddonDef.APIVersion = NEXUS_API_VERSION;
+    AddonDef.Name = "Notepad";
+    AddonDef.Version.Major = 1;
+    AddonDef.Version.Minor = 0;
+    AddonDef.Version.Build = 0;
+    AddonDef.Version.Revision = 0;
+    AddonDef.Author = "gumibo.1643";
+    AddonDef.Description = "Keep persistent notes for your journey.";
+    AddonDef.Load = AddonLoad;
+    AddonDef.Unload = AddonUnload;
+    AddonDef.Flags = EAddonFlags_None;
+    return &AddonDef;
 }
 
 ///----------------------------------------------------------------------------------------------------
-/// AddonLoad:
-/// 	Load function for the addon, will receive a pointer to the API.
-/// 	(You probably want to store it.)
+/// AddonLoad
 ///----------------------------------------------------------------------------------------------------
 void AddonLoad(AddonAPI* aApi)
 {
-	FreeConsole();
-	APIDefs = aApi; // store the api somewhere easily accessible
+    FreeConsole();
+    APIDefs = aApi;
 
-	ImGui::SetCurrentContext((ImGuiContext*)APIDefs->ImguiContext); // cast to ImGuiContext*
-	ImGui::SetAllocatorFunctions((void* (*)(size_t, void*))APIDefs->ImguiMalloc, (void(*)(void*, void*))APIDefs->ImguiFree); // on imgui 1.80+
+    ImGui::SetCurrentContext((ImGuiContext*)APIDefs->ImguiContext);
+    ImGui::SetAllocatorFunctions((void* (*)(size_t, void*))APIDefs->ImguiMalloc,
+                                 (void(*)(void*, void*))APIDefs->ImguiFree);
 
-	NexusLink = (NexusLinkData*)APIDefs->DataLink.Get("DL_NEXUS_LINK");
-	MumbleLink = (Mumble::Data*)APIDefs->DataLink.Get("DL_MUMBLE_LINK");
+    NexusLink = (NexusLinkData*)APIDefs->DataLink.Get("DL_NEXUS_LINK");
+    MumbleLink = (Mumble::Data*)APIDefs->DataLink.Get("DL_MUMBLE_LINK");
 
-	// Add an options window and a regular render callback
-	APIDefs->Renderer.Register(ERenderType_Render, AddonRender);
-	APIDefs->Renderer.Register(ERenderType_OptionsRender, AddonOptions);
-
-    // Set Keybinding
+    APIDefs->Renderer.Register(ERenderType_Render, AddonRender);
+    APIDefs->Renderer.Register(ERenderType_OptionsRender, AddonOptions);
     APIDefs->InputBinds.RegisterWithString(gId, OnKeybind, gKeybind);
 
-    // Set up QuickAccess
-    APIDefs->Textures.LoadFromMemory(
-        gTexId,
-        (void*)icon_png,
-        icon_png_len,
-        nullptr
-    );
+    APIDefs->Textures.LoadFromMemory(gTexId, (void*)icon_png, icon_png_len, nullptr);
+    APIDefs->QuickAccess.Add("QA_NOTEPAD", gTexId, gTexId, gId, "Toggle Notepad");
 
-    APIDefs->QuickAccess.Add(
-        "QA_NOTEPAD",
-        gTexId,
-        gTexId,
-        gId,
-        "Toggle Notepad"
-    );
-
-    // Load notepad and settings.
     LoadSettings();
-
-	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#00ff00>Notepad loaded.</c>");
+    APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#00ff00>Notepad loaded.</c>");
 }
 
 ///----------------------------------------------------------------------------------------------------
-/// AddonUnload:
-/// 	Everything you registered in AddonLoad, you should "undo" here.
+/// AddonUnload
 ///----------------------------------------------------------------------------------------------------
 void AddonUnload()
 {
-	/* let's clean up after ourselves */
-	APIDefs->Renderer.Deregister(AddonRender);
-	APIDefs->Renderer.Deregister(AddonOptions);
-
+    APIDefs->Renderer.Deregister(AddonRender);
+    APIDefs->Renderer.Deregister(AddonOptions);
     APIDefs->InputBinds.Deregister(gId);
-
     APIDefs->QuickAccess.Remove("QA_NOTEPAD");
-
-	SaveSettings();
-
-	APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#ff0000>Notepad unloaded.</c>");
+    SaveSettings();
+    APIDefs->Log(ELogLevel_DEBUG, "Notepad", "<c=#ff0000>Notepad unloaded.</c>");
 }
 
 ///----------------------------------------------------------------------------------------------------
-/// AddonRender:
-/// 	Called every frame. Safe to render any ImGui.
-/// 	You can control visibility on loading screens with NexusLink->IsGameplay.
+/// AddonRender
 ///----------------------------------------------------------------------------------------------------
+void AddonRender()
+{
+    // Autosave check – runs even when window is hidden
+    if (isTextDirty)
+    {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastTypeTime).count();
+        if (elapsed >= 1)
+            SaveSettings();
+    }
 
-void AddonRender() {
-    // Cutscenes
-    static uint32_t lastTick  = 0;
-    static int      frozenFor = 0;
-
+    // Cutscene / loading screen detection
+    static uint32_t lastTick = 0;
+    static int frozenFor = 0;
     if (MumbleLink && MumbleLink->UITick != lastTick)
     {
-        lastTick  = MumbleLink->UITick;
+        lastTick = MumbleLink->UITick;
         frozenFor = 0;
     }
-    else { frozenFor++; }
+    else
+    {
+        frozenFor++;
+    }
 
-    if (!isDataLoaded || !showWindow || (NexusLink && !NexusLink->IsGameplay) || frozenFor > 2){return;}
+    if (!isDataLoaded || !showWindow || (NexusLink && !NexusLink->IsGameplay) || frozenFor > 2)
+        return;
 
-    // Tab switch, save current note than load new note
-    if (gPendingNoteId != -1){
+    // Apply pending tab switch
+    if (gPendingNoteId != -1)
+    {
         gNotepad.setNoteText(gActiveNoteId, textBuffer.data());
         SaveSettings();
+
         std::string incoming = gNotepad.getNoteText(gPendingNoteId);
         textBuffer.assign(incoming.begin(), incoming.end());
         textBuffer.push_back('\0');
+
         gActiveNoteId = gPendingNoteId;
         gPendingNoteId = -1;
         isTextDirty = false;
     }
 
-	// Dynamic resize callback for when ImGui outgrows the current vector size.
-	// resizes vector safely and ipdates internal buffer pointer.
     auto textCallback = [](ImGuiInputTextCallbackData* data) -> int {
         if (data->EventFlag == ImGuiInputTextFlags_CallbackResize)
         {
-            std::vector<char>* vec = static_cast<std::vector<char>*>(data->UserData);
-            vec->resize(data->BufTextLen + 1); // +1 accounts for the null-terminator '\0'
-            data->Buf = vec->data();           // Re-point ImGui to the new memory location
+            auto* vec = static_cast<std::vector<char>*>(data->UserData);
+            vec->resize(data->BufTextLen + 1);
+            data->Buf = vec->data();
         }
         return 0;
     };
 
-	// Dynamic window title for when notes are saved/unsaved
-    // std::string windowTitle;
-    // if (isTextDirty) {
-    //     windowTitle = "Notepad*###NotepadWindow";
-    // } else {
-    //     windowTitle = "Notepad###NotepadWindow";
-    // }
-
-    // ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
-    // if (ImGui::Begin(windowTitle.c_str()))
-    // {
-
-	// 	// Callback flag along with pointer to our vector metadata (&textBuffer)
-    //     // if (ImGui::InputTextMultiline("##NotepadField", 
-    //     //     textBuffer.data(), 
-    //     //     textBuffer.size(), 
-    //     //     ImVec2(-FLT_MIN, -FLT_MIN), 
-    //     //     ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackResize,
-    //     //     textCallback, 
-    //     //     &textBuffer
-    //     // ))
-    //     {
-    //         // Sync the master string back from our safe char array
-    //         stagingText = textBuffer.data();
-    //         gNotepad.setNoteText(gActiveNoteId, textBuffer.data());
-    //         isTextDirty = true;
-    //         lastTypeTime = std::chrono::steady_clock::now();
-    //     }
-    // }
-    // ImGui::End();
-std::string windowTitle;
-    if (isTextDirty) {
-        windowTitle = "Notepad*###NotepadWindow";
-    } else {
-        windowTitle = "Notepad###NotepadWindow";
-    }
-
-    // --- INSERT NEW TAB BAR CODE HERE ---
+    std::string windowTitle = isTextDirty ? "Notepad*###NotepadWindow" : "Notepad###NotepadWindow";
     ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
+
     if (ImGui::Begin(windowTitle.c_str()))
     {
-        // Deferred mutation flags/queues (safe: do NOT mutate notes vector inside loop)
         bool wantAdd = false;
-        std::vector<int> toRemove;
-
         ImGuiTabBarFlags tbFlags = ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_FittingPolicyScroll;
-        
+
         if (ImGui::BeginTabBar("##NotepadTabs", tbFlags))
         {
             for (auto& note : gNotepad.notes)
             {
-                bool open = true;
-                
-                // Edge Case Guard: Disable the close button when only one tab remains
-                bool* p_open = (gNotepad.getLength() > 1) ? &open : nullptr;
-
-                std::string label = "#" + std::to_string(note.mId);
-                
-                if (ImGui::BeginTabItem(label.c_str(), p_open))
+                std::string label = "#" + std::to_string(note.mId) + "###Tab_" + std::to_string(note.mId);
+                if (ImGui::BeginTabItem(label.c_str(), nullptr, ImGuiTabItemFlags_None))
                 {
-                    // Detect tab click -> queue the switch
-                    if (note.mId != gActiveNoteId && gPendingNoteId == -1)
-                    {
+                    if (note.mId != gActiveNoteId)
                         gPendingNoteId = note.mId;
-                    }
 
-                    // Render the text field ONLY for the active note
                     if (note.mId == gActiveNoteId)
                     {
-                        if (ImGui::InputTextMultiline("##NotepadField", 
-                            textBuffer.data(), 
-                            textBuffer.size(), 
-                            ImVec2(-FLT_MIN, -FLT_MIN), // Corrected to fill full panel
-                            ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackResize,
-                            textCallback, 
-                            &textBuffer))
+                        if (ImGui::InputTextMultiline("##NotepadField",
+                                textBuffer.data(),
+                                textBuffer.size(),
+                                ImVec2(-1.0f, -40.0f),
+                                ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackResize,
+                                textCallback,
+                                &textBuffer))
                         {
                             gNotepad.setNoteText(gActiveNoteId, textBuffer.data());
                             isTextDirty = true;
@@ -299,145 +219,142 @@ std::string windowTitle;
                     }
                     ImGui::EndTabItem();
                 }
-
-                // If user clicked the 'X', flag it for deletion
-                if (!open)
-                {
-                    toRemove.push_back(note.mId);
-                }
             }
 
-            // Trailing '+' tab to add new notes
-            // ImGuiTabItemFlags addFlags = ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip | ImGuiTabItemFlags_SetSelected;
-            // if (ImGui::BeginTabItem("+", nullptr, addFlags))
-            // {
-            //     wantAdd = true;
-            //     ImGui::EndTabItem();
-            // }
-           
             if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing))
-            {
                 wantAdd = true;
-            }
+
             ImGui::EndTabBar();
         }
 
-        // --- Execute Deferred Mutations (Safe: outside loop) ---
-        if (!toRemove.empty())
+        ImGui::Separator();
+
+        if (gNotepad.getLength() > 1 && ImGui::Button("Delete Current Note"))
+            ImGui::OpenPopup("ConfirmDeleteNote");
+
+        if (ImGui::BeginPopupModal("ConfirmDeleteNote", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
-            for (int id : toRemove)
+            ImGui::Text("Are you sure you want to delete this note?");
+            ImGui::Separator();
+
+            if (ImGui::Button("Delete", ImVec2(120, 0)))
             {
-                if (id == gActiveNoteId)
+                int noteToDelete = gActiveNoteId;
+                int newActiveId = -1;
+                for (auto& note : gNotepad.notes)
                 {
-                    for (auto& n : gNotepad.notes)
+                    if (note.mId != noteToDelete)
                     {
-                        if (n.mId != id)
-                        { 
-                            gPendingNoteId = n.mId;
-                            break;
-                        }
+                        newActiveId = note.mId;
+                        break;
                     }
                 }
-                gNotepad.removeNoteInstance(id);
+                if (newActiveId != -1)
+                {
+                    gActiveNoteId = newActiveId;
+                    std::string newText = gNotepad.getNoteText(newActiveId);
+                    textBuffer.assign(newText.begin(), newText.end());
+                    textBuffer.push_back('\0');
+                    gPendingNoteId = -1;
+                    isTextDirty = false;
+                }
+                gNotepad.removeNoteInstance(noteToDelete);
+                SaveSettings();
+                ImGui::CloseCurrentPopup();
             }
-            SaveSettings(); 
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
         }
 
         if (wantAdd)
         {
-            gNotepad.addNoteInstance(false); 
-            gPendingNoteId = gNotepad.notes.back().mId; 
+            gNotepad.addNoteInstance(false);
+            gPendingNoteId = gNotepad.notes.back().mId;
             SaveSettings();
         }
     }
     ImGui::End();
-
-    // Autosave logic
-    if (isTextDirty)
-    {
-        auto currentTime = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(currentTime - lastTypeTime).count();
-
-        if (elapsed >= 1) 
-        {
-            SaveSettings();
-        }
-    }    
 }
 
 ///----------------------------------------------------------------------------------------------------
-/// AddonOptions:
-/// 	Basically an ImGui callback that doesn't need its own Begin/End calls.
+/// AddonOptions
 ///----------------------------------------------------------------------------------------------------
 void AddonOptions()
 {
-	ImGui::Separator();
-	ImGui::Text("Notepad");
-    if (ImGui::Checkbox("Show Window", &showWindow)){
+    ImGui::Separator();
+    ImGui::Text("Notepad");
+    if (ImGui::Checkbox("Show Window", &showWindow))
+    {
         SaveSettings();
     }
 }
 
-void OnKeybind(const char* aId, bool aIsRelease){
-    if (strcmp(aId, gId) == 0 && !aIsRelease){
+///----------------------------------------------------------------------------------------------------
+/// OnKeybind
+///----------------------------------------------------------------------------------------------------
+void OnKeybind(const char* aId, bool aIsRelease)
+{
+    if (strcmp(aId, gId) == 0 && !aIsRelease)
+    {
+        // If we are hiding the window and there is unsaved text, save immediately
+        if (showWindow && isTextDirty)
+            SaveSettings();
         showWindow = !showWindow;
     }
 }
 
+///----------------------------------------------------------------------------------------------------
+/// LoadSettings
+///----------------------------------------------------------------------------------------------------
 void LoadSettings()
 {
-    CreateDirectoryA(dirPath.c_str(), NULL);
+    // Create directory with error logging
+    if (CreateDirectoryA(dirPath.c_str(), NULL) == 0)
+    {
+        DWORD err = GetLastError();
+        if (err != ERROR_ALREADY_EXISTS && APIDefs)
+        {
+            APIDefs->Log(ELogLevel_WARNING, "Notepad",
+                ("Failed to create directory " + dirPath + ", error: " + std::to_string(err)).c_str());
+        }
+    }
 
     std::ifstream file(savePath);
     if (file.is_open())
     {
-        try{
+        try
+        {
             json j;
             file >> j;
             file.close();
 
-            if (j.contains("notepad_data")) {
+            if (j.contains("notepad_data"))
                 gNotepad = j.at("notepad_data").get<Notepad>();
-            }
 
             showWindow = j.value("show_window", false);
-        } catch (...) {
-            //malformed JSON -- fallback to defaults
-            // gNotepad's constructor already handles defaults.
-            stagingText = "Type anything here...";
+        }
+        catch (...)
+        {
+            // Malformed JSON – fallback to defaults
             showWindow = false;
         }
     }
-    // else
-    // {
-    //     stagingText = "Type anything here...";
-    // }
-
-
-    // // textBuffer.assign(myNotepadText.begin(), myNotepadText.end());
-    // gActiveNoteId = gNotepad.notes.front().mId; // first note on fresh load
-    // stagingText = gNotepad.getNoteText(gActiveNoteId);
-    // textBuffer.assign(stagingText.begin(), stagingText.end());
-    // textBuffer.push_back('\0');
-
-    // isDataLoaded = true;
-	// lastTypeTime = std::chrono::steady_clock::now();
     else
     {
         showWindow = false;
     }
 
-    // Defensive Guard: If there are no notes loaded from JSON, seed exactly ONE clean note
+    // Ensure at least one note exists
     if (gNotepad.notes.empty())
     {
         gNotepad.mIdCounter = 0;
         gNotepad.notes.push_back({gNotepad.mIdCounter++, false, "Type anything here..."});
     }
 
-    // Set focus safely
     gActiveNoteId = gNotepad.notes.front().mId;
     gPendingNoteId = -1;
-
     std::string text = gNotepad.getNoteText(gActiveNoteId);
     textBuffer.assign(text.begin(), text.end());
     textBuffer.push_back('\0');
@@ -446,6 +363,9 @@ void LoadSettings()
     lastTypeTime = std::chrono::steady_clock::now();
 }
 
+///----------------------------------------------------------------------------------------------------
+/// SaveSettings
+///----------------------------------------------------------------------------------------------------
 void SaveSettings()
 {
     json j;
@@ -457,9 +377,8 @@ void SaveSettings()
     {
         file << j.dump(4);
         file.close();
-        isTextDirty = false; // Reset our flag
-        if (APIDefs) {
+        isTextDirty = false;
+        if (APIDefs)
             APIDefs->Log(ELogLevel_DEBUG, "Notepad", "Settings and notepad saved to disk.");
-        }
     }
 }
